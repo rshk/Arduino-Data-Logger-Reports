@@ -29,6 +29,22 @@ def slrgen(start=None,mindelta=0,maxdelta=5,minval=0,maxval=1000):
         if maxval is not None: s=min(maxval,s)
         if minval is not None: s=max(minval,s)
 
+def analog_sensor_color(val):
+    _hue_cold = 300/360.0 ## For low values
+    _hue_hot = 0/360.0 ## For high values
+    
+    _delta = _hue_hot - _hue_cold
+    _d2 = _delta * val
+    hue = _hue_cold + _d2
+    
+    import colorsys
+    h,s,v = hue, 1.0, 1.0
+    rgb = colorsys.hsv_to_rgb(h, s, v)
+    h,l,s = colorsys.rgb_to_hls(*rgb)
+    greyscale_rgb = colorsys.hls_to_rgb(h, l, 0)
+    #return '#%02X%02X%02X' % tuple(c*255 for c in rgb)
+    return '#%02X%02X%02X' % tuple(c*255 for c in colorsys.hls_to_rgb(h, l*1.5, 1))
+
 ##------------------------------------------------------------
 ## Parsed data for testing.
 ## This is completely random data.
@@ -58,7 +74,7 @@ _now = datetime.datetime.now()
 
 _data_logging_period = 5 * 3600 #seconds
 _data_logging_tick = 30 #seconds
-_analog_max = 1024
+_analog_max = 1024.0 #float!
 
 ## Used to generate data
 sensors_digital = [slrgen(minval=0,maxval=1) for x in range(5)]
@@ -106,9 +122,13 @@ def format_value(cid, value):
     if data_columns[cid] == 'date':
         return format_date(value)
     elif data_columns[cid] == 'digital':
-        return 'HIGH' if value else 'LOW'
+        #return 'HIGH' if value else 'LOW'
+        return '<img src="%s" alt="%s" />' % (('img/lightbulb.png', 'HIGH') if value else ('img/lightbulb_off.png', 'LOW'))
     elif data_columns[cid] == 'analog':
-        return "<span title='%d'>%s</span>" % (value, "%.1f%%" % (value*100.0/_analog_max))
+        return "<span title='%d' style='%s'>%s</span>" % (
+            value,
+            'background-color: %s;' % analog_sensor_color(value/_analog_max),
+            "%.1f%%" % (value*100.0/_analog_max))
     else:
         return value
 
