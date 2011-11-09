@@ -30,7 +30,7 @@ def slrgen(start=None,mindelta=0,maxdelta=5,minval=0,maxval=1000):
         if minval is not None: s=max(minval,s)
 
 def analog_sensor_color(val):
-    _hue_cold = 300/360.0 ## For low values
+    _hue_cold = 240/360.0 ## For low values
     _hue_hot = 0/360.0 ## For high values
     
     _delta = _hue_hot - _hue_cold
@@ -78,7 +78,7 @@ _analog_max = 1024.0 #float!
 
 ## Used to generate data
 sensors_digital = [slrgen(minval=0,maxval=1) for x in range(5)]
-sensors_analog = [slrgen(minval=0,maxval=_analog_max-1,maxdelta=20) for x in range(5)]
+sensors_analog = [slrgen(minval=0,maxval=_analog_max-1,maxdelta=20) for x in range(7)]
 
 PARSED_DATA = sorted([
     
