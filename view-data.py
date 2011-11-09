@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 
-#from datetime import datetime
+##------------------------------------------------------------------------------
+## cgi script to be used to display data from the Arduino Data Logger.
+## Copyright (C) 2011 Samuele Santi <redshadow@hackzine.org>
+## Under GPLv3
+##------------------------------------------------------------------------------
+
 import time,datetime
 from email.message import Message
 from random import randint,choice
@@ -51,8 +56,11 @@ def slrgen(start=None,mindelta=0,maxdelta=5,minval=0,maxval=1000):
 
 _now = datetime.datetime.now()
 
-sensors_analog = [slrgen(minval=0,maxval=1023,maxdelta=20) for x in range(5)]
 sensors_digital = [slrgen(minval=0,maxval=1) for x in range(5)]
+sensors_analog = [slrgen(minval=0,maxval=1023,maxdelta=20) for x in range(5)]
+
+_data_logging_period = 5 * 3600 #seconds
+_data_logging_tick = 30 #seconds
 
 PARSED_DATA = sorted([
     
@@ -62,52 +70,76 @@ PARSED_DATA = sorted([
     [_date]
 
     ## Digital sensors
-    #+ [choice([True,False]) for x in range(5)]
     + [bool(x.next()) for x in sensors_digital]
 
     ## Analog sensors
-    #+ [randint(0,1023) for x in range(5)]
     + [x.next() for x in sensors_analog]
 
     )
 
-    ## Recordings for one day
-    #for d in xrange(*[int(time.time())+x for x in (-24*3600,0)]+[10])
-
-    for _date in [_now + datetime.timedelta(seconds=delta*30) for delta in range(5*3600/30)]
+    ## For each reading time, read a random value from a fake sensor
+    for _date in [_now - datetime.timedelta(seconds=delta*_data_logging_tick)
+        for delta in range(_data_logging_period/_data_logging_tick)]
 
 ], key=lambda t:t[0])
 
+## Register column types. This should be read from configuration
+## or CSV table header.
+data_columns = ['date']
+data_columns += ['digital' for i in sensors_digital]
+#for i in sensors_digital:
+#    data_columns.append('digital')
+for i in sensors_analog:
+    data_columns.append('analog')
 
 ### --- HTML data table
 def _column_label(cid):
-    if cid==0:
+    if data_columns[cid] == 'date':
         return "Date"
-    elif cid -1 < len(sensors_digital):
-        return "S%03d (D)" % cid
-    elif cid -1 -len(sensors_digital) < len(sensors_analog):
-        return "S%03d (A)" % cid
+    elif data_columns[cid] == 'digital':
+        return "<span class='sensor-label-digital'>%d</span>" % cid
+    elif data_columns[cid] == 'analog':
+        return "<span class='sensor-label-analog'>%d</span>" % cid
     else:
         return "---"
 
-data_table_html = "<table class='data-table'>%s</table>" % "".join([
-    "<tr>%s</tr>" % "".join([
-           "<th></th>"
-    ] + [
-           "<th>%s</th>" % _column_label(cid)
-           for cid in range(len(PARSED_DATA[0]))
-    ])
-] + [
-    "<tr>%s</tr>" % "".join([
-           "<td>%d</td>" % rid
-    ] + [
-           "<td>%s</td>" % (field if cid!=0 else format_date(field))
-           for cid,field in enumerate(record)
-    ])
-    for rid,record in enumerate(PARSED_DATA)
-])
+def format_value(cid, value):
+    if data_columns[cid] == 'date':
+        return format_date(value)
+    elif data_columns[cid] == 'digital':
+        pass
+    elif data_columns[cid] == 'analog':
+        pass
+    else:
+        return value
 
-### --- matplotlib plot
+data_table_html = "<table class='data-table'>%s</table>" % "".join(
+    [ ## Header
+    "<thead><tr>%s</tr></thead>" % "".join(
+        ["<th></th>"] +
+        ["<th>%s</th>" % _column_label(cid) for cid in range(len(PARSED_DATA[0]))])
+    ] +
+    
+    ## Table content
+    ['<tbody>'] +
+    ["<tr class='%s'>%s</tr>" % (
+        'odd' if rid%2 else 'even',
+        "".join(
+            ["<td>%d</td>" % rid] + 
+            ["<td class='%s'>%s</td>" % (
+                'field-%s-value' % data_columns[cid],
+                format_value(cid, field))
+             for cid,field in enumerate(record)]
+        )
+    )
+    for rid,record in enumerate(PARSED_DATA)
+    ] +
+    ['</tbody>']
+)
+
+
+
+### --- Create chart using matplotlib
 import os
 os.environ['MPLCONFIGDIR'] = '/tmp'
 import StringIO
@@ -137,6 +169,8 @@ plt.savefig(a,format='png',dpi=90)
 a.seek(0)
 data_plot_png_html = '<img src="data:image/png;base64,%s" alt="The Plot" />' % base64.encodestring(a.read())
 
+
+
 ### --- Generate response
 response=Message()
 response.set_type('text/html')
@@ -145,9 +179,13 @@ response.set_payload("""\
 <html><head>
     <title>Arduino data logger</title>
 <style type='text/css'>
-.data-table{border-collapse:collapse;font-family:monospace;}
+.data-table{border-collapse:collapse;font-family:monospace;box-shadow:#888 2 2 2;}
 .data-table,.data-table td{border:solid 1px #888;text-align:right;padding:2px;}
-.data-table th {text-align:center;}
+.data-table th {text-align:center;background:#ddd;}
+.sensor-label-analog {color:#f00;}
+.sensor-label-digital {color:#00f;}
+tr.even td {background:#fff;}
+tr.odd td {background:#eee;}
 </style>
 </head><body>
     <h1>Arduino data logger</h1>
