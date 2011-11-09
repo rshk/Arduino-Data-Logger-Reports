@@ -54,10 +54,12 @@ size = width, height = 1024, 800
 screen = pygame.display.set_mode(size)
 clock = pygame.time.Clock()
 max_fps = 50
+show_fps_label = True
 FONTS_DIR = os.path.join(os.path.dirname(__file__), 'fonts')
 
 font_sensor_value_large = pygame.font.Font(os.path.join(FONTS_DIR, 'orbitron-bold.ttf'), 40)
 font_sensor_label = pygame.font.Font(os.path.join(FONTS_DIR, 'orbitron-light.ttf'), 14)
+font_small = pygame.font.Font(os.path.join(FONTS_DIR, 'orbitron-light.ttf'), 12)
 
 SENSORS = {
     's1': slrgen(start=None, maxdelta=3, minval=0, maxval=100),
@@ -88,10 +90,23 @@ _force_refresh = False
 _refresh_count = 0
 _horizontal_unit_length = 10
 
-while 1:
+keep_running = True
+
+while keep_running:
     ## Process events
     for event in pygame.event.get():
-        if event.type == pygame.QUIT: sys.exit()
+        if event.type == pygame.QUIT:
+            #sys.exit()
+            keep_running = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                #sys.exit()
+                keep_running = False
+            elif event.key == pygame.K_F5:
+                ## Should flash
+                _force_refresh = True
+                screen.fill([0xff,0xff,0xff])
+                pygame.time.delay(10)
     
     ## Draw/update charts
     #screen.fill((0,0,0))
@@ -102,6 +117,10 @@ while 1:
     _now = pygame.time.get_ticks()
     
     if _force_refresh or not _last_refresh or (_last_refresh + _refresh_time < _now):
+        if _force_refresh:
+            _refresh_count = 0 # Restart drawing
+            screen.fill([0x00,0x00,0x00])
+            _force_refresh = False # Set off
         for sensor_id, sensor in enumerate(sorted(SENSORS.keys())):
             _sensor_value = SENSORS[sensor].next()
             
@@ -193,10 +212,26 @@ while 1:
     #textRect.top -= 10
     #textRect.left -= 10
     
-    
+    ## FPS LABEL
+    if show_fps_label:
+        _fps = clock.get_fps()
+        if _fps >= 40:
+            _col = [0x00,0xff,0x00]
+        elif _fps >= 25:
+            _col = [0xff,0xff,0x00]
+        else:
+            _col = [0xff,0x00,0x00]
+        text = font_small.render("%d FPS" % clock.get_fps(),True,_col)
+        textRect = text.get_rect()
+        textRect.bottomleft = 0,screen.get_height()
+        textRect.width=max(40,textRect.width)
+        screen.fill([0,0,0], textRect)
+        screen.blit(text, textRect)
     
     
     pygame.display.flip()
     
     ## Wait a bit..
     clock.tick(max_fps)
+
+pygame.quit()
