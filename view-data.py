@@ -56,11 +56,13 @@ def slrgen(start=None,mindelta=0,maxdelta=5,minval=0,maxval=1000):
 
 _now = datetime.datetime.now()
 
-sensors_digital = [slrgen(minval=0,maxval=1) for x in range(5)]
-sensors_analog = [slrgen(minval=0,maxval=1023,maxdelta=20) for x in range(5)]
-
 _data_logging_period = 5 * 3600 #seconds
 _data_logging_tick = 30 #seconds
+_analog_max = 1024
+
+## Used to generate data
+sensors_digital = [slrgen(minval=0,maxval=1) for x in range(5)]
+sensors_analog = [slrgen(minval=0,maxval=_analog_max-1,maxdelta=20) for x in range(5)]
 
 PARSED_DATA = sorted([
     
@@ -86,20 +88,17 @@ PARSED_DATA = sorted([
 ## Register column types. This should be read from configuration
 ## or CSV table header.
 data_columns = ['date']
-data_columns += ['digital' for i in sensors_digital]
-#for i in sensors_digital:
-#    data_columns.append('digital')
-for i in sensors_analog:
-    data_columns.append('analog')
+for i in sensors_digital: data_columns.append('digital')
+for i in sensors_analog: data_columns.append('analog')
 
 ### --- HTML data table
 def _column_label(cid):
     if data_columns[cid] == 'date':
         return "Date"
     elif data_columns[cid] == 'digital':
-        return "<span class='sensor-label-digital'>%d</span>" % cid
+        return "<span title='Digital Sensor' class='sensor-label-digital'>%d</span>" % cid
     elif data_columns[cid] == 'analog':
-        return "<span class='sensor-label-analog'>%d</span>" % cid
+        return "<span title='Analog Sensor' class='sensor-label-analog'>%d</span>" % cid
     else:
         return "---"
 
@@ -107,16 +106,16 @@ def format_value(cid, value):
     if data_columns[cid] == 'date':
         return format_date(value)
     elif data_columns[cid] == 'digital':
-        pass
+        return 'HIGH' if value else 'LOW'
     elif data_columns[cid] == 'analog':
-        pass
+        return "<span title='%d'>%s</span>" % (value, "%.1f%%" % (value*100.0/_analog_max))
     else:
         return value
 
 data_table_html = "<table class='data-table'>%s</table>" % "".join(
     [ ## Header
     "<thead><tr>%s</tr></thead>" % "".join(
-        ["<th></th>"] +
+        ["<th>ID</th>"] +
         ["<th>%s</th>" % _column_label(cid) for cid in range(len(PARSED_DATA[0]))])
     ] +
     
@@ -154,7 +153,11 @@ fig.set_size_inches(20,10)
 
 ax = plt.subplot(111)
 #ax.plot_date([datetime.datetime(2011,11,1)+datetime.timedelta(minutes=i) for i in range(20)], [randint(0,100) for i in range(20)], 'r-', color=(1,0.5,0,1))
-for cid in xrange(1+len(sensors_digital), 1+len(sensors_digital)+len(sensors_analog)):
+
+## Filter by column
+_analog_sensors_columns = map(lambda x:x[0], filter(lambda y:y[1] == 'analog', enumerate(data_columns)))
+#for cid in xrange(1+len(sensors_digital), 1+len(sensors_digital)+len(sensors_analog)):
+for cid in _analog_sensors_columns:
     ax.plot_date(
         [row[0] for row in PARSED_DATA],
         [row[cid] for row in PARSED_DATA],
@@ -179,9 +182,10 @@ response.set_payload("""\
 <html><head>
     <title>Arduino data logger</title>
 <style type='text/css'>
-.data-table{border-collapse:collapse;font-family:monospace;box-shadow:#888 2 2 2;}
-.data-table,.data-table td{border:solid 1px #888;text-align:right;padding:2px;}
+.data-table{border-collapse:collapse;font-family:monospace;box-shadow:#888 2px 2px 2px;}
+.data-table,.data-table td{border:solid 1px #888;padding:2px 5px;}
 .data-table th {text-align:center;background:#ddd;}
+.data-table td.field-analog-value {text-align:right;}
 .sensor-label-analog {color:#f00;}
 .sensor-label-digital {color:#00f;}
 tr.even td {background:#fff;}
