@@ -2,11 +2,60 @@
 
 '''
 Realtime monitor for Arduino Data Logger.
+
+@todo: avoid overflows: draw on a separate surface that gets blit exactly in place
+@todo: support resizing
 '''
 
 import sys,os
+import datetime
 from random import choice, randint
 import pygame
+
+class LimitedSizeList(list):
+    max_size = 10
+    def append(self, object):
+        list.append(self, object)
+        if self.max_size and (len(self) > self.max_size):
+            self.pop(0)
+
+class AnalogSensorBase:
+    """Base class for analog sensor objects.
+    """
+    
+    label = ""
+    color = None
+    values_history = None
+    value_generator = None
+    
+    def __init__(self, label=None, color=None, history_size=500, value_generator=None):
+        self.label = label or ""
+        self.color = color
+        self.values_history = LimitedSizeList()
+        self.values_history.max_size = history_size
+        self.value_generator = value_generator
+    
+    def read_current_value(self):
+        """To be overwritten by subclasses: read and return 
+        the current sensor value.
+        """
+        return self.value_generator.next()
+    
+    def read(self):
+        """Read value from the sensor"""
+        value = self.read_current_value()
+        self.values_history.append((datetime.datetime.now(), value))
+        return value
+    
+    def next(self):
+        """Used to support iteration"""
+        return self.read()
+    
+    def get_history(self, size=0):
+        """Get the last ``size`` history items.
+        Each history item is a ``(datetime, value)`` tuple.
+        """
+        return self.values_history[-size:] # Returns a copy of the history
 
 def slrgen(start=None,mindelta=0,maxdelta=5,minval=0,maxval=1000):
     """Generator of slightly random numbers.
@@ -37,7 +86,9 @@ def analog_sensor_color(val):
     #return '#%02X%02X%02X' % tuple(c*255 for c in rgb)
     return tuple(c*255 for c in colorsys.hls_to_rgb(h, l*1.5, 1))
 
-def loop_const_gen(vals):
+def loop_const_gen(vals=None):
+    if vals is None:
+        vals = [randint(0,100) for i in range(15)]
     while True:
         for v in vals:
             yield v
@@ -48,10 +99,14 @@ def loop_sin(steps):
         for s in xrange(steps):
             yield 50 + (math.sin(math.pi * 2 * (s*1.0/steps)) * 50)
 
+def loop_randint(min,max):
+    while True:
+        yield randint(min, max)
+
 pygame.init()
 pygame.display.set_caption("Arduino Sensor Monitor")
 size = width, height = 1024, 800
-screen = pygame.display.set_mode(size)
+screen = pygame.display.set_mode(size, pygame.RESIZABLE|pygame.DOUBLEBUF)
 clock = pygame.time.Clock()
 max_fps = 50
 show_fps_label = True
@@ -61,20 +116,33 @@ font_sensor_value_large = pygame.font.Font(os.path.join(FONTS_DIR, 'orbitron-bol
 font_sensor_label = pygame.font.Font(os.path.join(FONTS_DIR, 'orbitron-light.ttf'), 14)
 font_small = pygame.font.Font(os.path.join(FONTS_DIR, 'orbitron-light.ttf'), 12)
 
-SENSORS = {
-    's1': slrgen(start=None, maxdelta=3, minval=0, maxval=100),
-    's2': slrgen(start=None, maxdelta=5, minval=0, maxval=100),
-    's3': loop_sin(20),
-    's4': loop_const_gen([5,10,12,20,50,80,70,30,20,15,10,9,8,4]),
-    's5': slrgen(start=None, maxdelta=5, minval=0, maxval=100),
+ANALOG_SENSORS = {
+    's1' : AnalogSensorBase(label='Sensor ONE', color=[0xff,0x00,0x00],
+                value_generator=slrgen(start=None, maxdelta=5, minval=0, maxval=100)),
+    's2' : AnalogSensorBase(label='Sensor TWO', color=[0xff,0xff,0x00],
+                value_generator=loop_const_gen()),
+    's3' : AnalogSensorBase(label='Sensor THREE', color=[0x00,0xff,0x00],
+                value_generator=loop_sin(20)),
+    's4' : AnalogSensorBase(label='Sensor FOUR', color=[0x88,0x88,0xff],
+                value_generator=loop_const_gen([5,10,12,20,50,80,70,30,20,15,10,9,8,4])),
+    's5' : AnalogSensorBase(label='Sensor FIVE', color=[0xff,0x00,0xff],
+                value_generator=loop_randint(0,100)),
 }
-SENSOR_COLORS = {
-    's1' : [0xff,0x00,0x00],
-    's2' : [0xff,0xff,0x00],
-    's3' : [0x00,0xff,0x00],
-    's4' : [0x88,0x88,0xff],
-    's5' : [0xff,0x00,0xff],
-}
+
+#SENSORS = {
+#    's1': slrgen(start=None, maxdelta=3, minval=0, maxval=100),
+#    's2': slrgen(start=None, maxdelta=5, minval=0, maxval=100),
+#    's3': loop_sin(20),
+#    's4': loop_const_gen([5,10,12,20,50,80,70,30,20,15,10,9,8,4]),
+#    's5': slrgen(start=None, maxdelta=5, minval=0, maxval=100),
+#}
+#SENSOR_COLORS = {
+#    's1' : [0xff,0x00,0x00],
+#    's2' : [0xff,0xff,0x00],
+#    's3' : [0x00,0xff,0x00],
+#    's4' : [0x88,0x88,0xff],
+#    's5' : [0xff,0x00,0xff],
+#}
 PREV_VAL = {}
 
 _last_refresh = 0
@@ -112,7 +180,7 @@ while keep_running:
     #screen.fill((0,0,0))
     
     screen_width, screen_height = screen.get_width(), screen.get_height()
-    _chart_row_height = int((screen_height - _padding) * 1.0 / len(SENSORS) - _padding)
+    _chart_row_height = int((screen_height - _padding) * 1.0 / len(ANALOG_SENSORS) - _padding)
     
     _now = pygame.time.get_ticks()
     
@@ -121,30 +189,31 @@ while keep_running:
             _refresh_count = 0 # Restart drawing
             screen.fill([0x00,0x00,0x00])
             _force_refresh = False # Set off
-        for sensor_id, sensor in enumerate(sorted(SENSORS.keys())):
-            _sensor_value = SENSORS[sensor].next()
+        
+        for sensor_count, (sensor_id, sensor) in enumerate(sorted(ANALOG_SENSORS.items())):
+            #_sensor_value = SENSORS[sensor_id].next()
+            _sensor_value = sensor.read()
             
+            ## Rectangle containing the numeric sensor value
             _sensor_rectangle = [
                 screen_width - _sensor_value_box_width - (2*_padding),
-                _padding + (sensor_id * (_chart_row_height + _padding)),
+                _padding + (sensor_count * (_chart_row_height + _padding)),
                 _sensor_value_box_width + _padding,
                 _chart_row_height,
                 ]
             textContainer = pygame.draw.rect(screen, [0x00,0x00,0x00], _sensor_rectangle, 0)
-            textContainer = pygame.draw.rect(screen, SENSOR_COLORS.get(sensor), _sensor_rectangle, 1)
+            textContainer = pygame.draw.rect(screen, sensor.color, _sensor_rectangle, 1)
             
-            ## Text color may change if limit reached, ..
+            ## Text color may change if some limit reached, ..
             _text_color = [0xff,0xff,0xff]
             
-            text = font_sensor_value_large.render("%.1f%%" % _sensor_value,True,_text_color)
+            text = font_sensor_value_large.render("%.1f%%" % _sensor_value, True, _text_color)
             textRect = text.get_rect()
-            #textRect.topright = (screen.get_rect().width-20,20)
-            #textRect.centerx = textContainer.centerx
             textRect.bottom = textContainer.bottom
             textRect.right = textContainer.right - 10
             screen.blit(text, textRect)
             
-            labelText = font_sensor_label.render("Analog sensor %s" % sensor,True,SENSOR_COLORS.get(sensor))
+            labelText = font_sensor_label.render(sensor.label, True, sensor.color)
             labelTextRect = labelText.get_rect()
             labelTextRect.top = textContainer.top + 10
             labelTextRect.centerx = textContainer.centerx
@@ -153,12 +222,12 @@ while keep_running:
             ## Chart rectangle
             _chart_rectangle = [
                 _padding,
-                _padding + (sensor_id * (_chart_row_height+_padding)),
+                _padding + (sensor_count * (_chart_row_height+_padding)),
                 screen_width - _sensor_value_box_width - (4 * _padding),
                 _chart_row_height,
                 ]
             #chartContainer = pygame.draw.rect(screen, [0x00,0x00,0x00], _chart_rectangle, 0)
-            chartContainer = pygame.draw.rect(screen, SENSOR_COLORS.get(sensor), _chart_rectangle, 1)
+            chartContainer = pygame.draw.rect(screen, sensor.color, _chart_rectangle, 1)
             
             _hpadding = 2
             _vpadding = 5
@@ -166,8 +235,13 @@ while keep_running:
             _chart_width = chartContainer.width - 2*_hpadding
             _chart_height = chartContainer.height - 2*_vpadding
             
-            _prev_dot_deltax = (((_refresh_count - 1) * _horizontal_unit_length) % _chart_width) if _refresh_count else 0
-            _prev_dot_deltay = _chart_height * PREV_VAL.get(sensor, 0) / 100.0
+            if _refresh_count > 0:
+                ## This is not the first refresh
+                _prev_dot_deltax = (((_refresh_count - 1) * _horizontal_unit_length) % _chart_width)
+            else:
+                ## This is the first refresh
+                _prev_dot_deltax = 0
+            _prev_dot_deltay = _chart_height * PREV_VAL.get(sensor_id, 0) / 100.0
             
             _dot_deltax = (_refresh_count * _horizontal_unit_length) % _chart_width
             _dot_deltay = _chart_height * _sensor_value / 100.0
@@ -182,7 +256,7 @@ while keep_running:
             _dot_pos = [chartContainer.left + _dot_deltax + _hpadding,
                 chartContainer.bottom - _dot_deltay - _vpadding]
             
-            if PREV_VAL.get(sensor, None) is None:
+            if PREV_VAL.get(sensor_id, None) is None:
                 _prev_dot_pos = _dot_pos
             elif _prev_dot_pos[0] > _dot_pos[0]:
                 _prev_dot_pos[0] = 0
@@ -190,17 +264,33 @@ while keep_running:
             ## Clean the surface to draw..
             pygame.draw.rect(screen, [0x00,0x00,0x00], [_dot_pos[0], chartContainer.top, _horizontal_unit_length, chartContainer.height], 0)
             
+            #pygame.draw.rect(screen, [0x00,0x00,0x00], [_dot_pos[0]+_horizontal_unit_length, chartContainer.top, _horizontal_unit_length*2, chartContainer.height], 0)
             
-            pygame.draw.line(screen, [0xff,0xff,0xff], _prev_dot_pos, _dot_pos, 2)
-            pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]-1], [_dot_pos[0], _dot_pos[1]-1])
-            pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]+1], [_dot_pos[0], _dot_pos[1]+1])
+            ## Draw cursor
+            pygame.draw.rect(screen, [0xff,0xff,0xff], [_dot_pos[0]+_horizontal_unit_length, chartContainer.top, 2, chartContainer.height], 0)
+            
+            ## Draw line (trick to antialias)
+            
+            for _dd in [-2, -1, 0, 1, 2]:
+                pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0]+_dd, _prev_dot_pos[1]], [_dot_pos[0]+_dd, _dot_pos[1]])
+                pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]+_dd], [_dot_pos[0], _dot_pos[1]+_dd])
+            pygame.draw.circle(screen, [0xff,0xff,0xff], _dot_pos, 2)
+            #pygame.draw.circle(screen, [0xff,0xff,0xff], _dot_pos, 4)
+            #pygame.draw.circle(screen, [0,0,0], _dot_pos, 2)
+            #pygame.draw.circle(screen, [0xff,0xff,0xff], _prev_dot_pos, 4)
+            #pygame.draw.circle(screen, [0,0,0], _prev_dot_pos, 2)
+            
+            #pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]-1.5], [_dot_pos[0], _dot_pos[1]-1.5])
+            #pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]-.5], [_dot_pos[0], _dot_pos[1]-.5])
+            #pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]+1.5], [_dot_pos[0], _dot_pos[1]+1.5])
+            #pygame.draw.aaline(screen, [0xff,0xff,0xff], [_prev_dot_pos[0], _prev_dot_pos[1]+.5], [_dot_pos[0], _dot_pos[1]+.5])
             
             
             ## Redraw frame
-            chartContainer = pygame.draw.rect(screen, SENSOR_COLORS.get(sensor), _chart_rectangle, 1)
+            chartContainer = pygame.draw.rect(screen, sensor.color, _chart_rectangle, 1)
             
             ## Update previous sensor value
-            PREV_VAL[sensor] = _sensor_value
+            PREV_VAL[sensor_id] = _sensor_value
             
         _refresh_count += 1
         
